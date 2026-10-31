@@ -3,103 +3,138 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>จ่ายของและรับคืน | ARSATU</title>
+    <title>จ่ายของ / รับคืน | ARSATU</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-    <script src="https://unpkg.com/@pdf-lib/fontkit@0.0.4/dist/fontkit.umd.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode"></script>
-    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
+
     <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600&display=swap" rel="stylesheet">
-    <style>body { font-family: 'Kanit', sans-serif; background-color: #f8fafc; }</style>
+    <style>
+        body { font-family: 'Kanit', sans-serif; background-color: #f8fafc; }
+        #pdf-container { position: relative; display: inline-block; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        #pdf-render { display: block; }
+        #draw-layer { position: absolute; top: 0; left: 0; cursor: crosshair; touch-action: none; z-index: 10; }
+        #qr-reader { width: 100%; max-width: 400px; margin: 0 auto; border-radius: 12px; overflow: hidden; }
+        #qr-reader__scan_region { background: white; }
+    </style>
 </head>
 <body class="bg-[#f8fafc] text-gray-700 h-screen overflow-hidden">
     
-    <!-- โครงสร้างหลัก (Sidebar + Content) -->
     <div id="app-layout" class="flex flex-col md:flex-row h-screen">
-        
-        <!-- โซนเนื้อหาหลัก -->
         <main class="flex-1 overflow-y-auto p-4 md:p-8 relative">
             
-            <div id="view-dashboard" class="max-w-5xl mx-auto w-full">
-                <header class="mb-6">
-                    <h1 class="text-2xl font-bold text-gray-800">📦 จัดการรับ-ส่งพัสดุ (Handover)</h1>
-                    <p class="text-sm text-gray-500 mt-1">สแกนตรวจสอบของ ถ่ายรูป และเซ็นชื่อร่วมกัน</p>
-                </header>
-
-                <!-- รายการรอจ่ายของ (Approved) -->
-                <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4 mb-6">
-                    <h2 class="font-bold text-lg text-indigo-700 mb-3 flex items-center gap-2">🔼 รอส่งมอบ (จ่ายของ)</h2>
-                    <div id="list-approved" class="space-y-3">กำลังโหลด...</div>
+            <!-- หน้าจอ 1: รายการรอจ่ายของ / รอรับคืน -->
+            <div id="view-list" class="flex-1 overflow-auto max-w-5xl mx-auto w-full">
+                <h1 class="text-2xl font-bold text-gray-800 mb-2">🤝 จ่ายของ / รับคืน (Handover & Return)</h1>
+                <p class="text-sm text-gray-500 mb-4">รายการคำขอที่รอจ่ายของให้ผู้ยืม และรายการที่รอนำมาคืน</p>
+                
+                <!-- 💡 เพิ่มช่องค้นหาและตัวกรองสถานะ -->
+                <div class="flex flex-col md:flex-row gap-3 mb-4">
+                    <input type="text" id="search-input" onkeyup="applyFilters()" placeholder="🔍 ค้นหาโครงการ, รหัส, ชื่อผู้ยืม..." class="w-full md:w-2/3 bg-white border border-gray-200 rounded-xl px-4 py-2.5 outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 shadow-sm transition-all text-sm">
+                    <select id="status-filter" onchange="applyFilters()" class="w-full md:w-1/3 bg-white border border-gray-200 rounded-xl px-4 py-2.5 outline-none focus:border-indigo-500 shadow-sm text-sm cursor-pointer">
+                        <option value="all">📋 ทุกสถานะ (รอจ่าย/กำลังยืม)</option>
+                        <option value="approved">📦 รอจ่ายของ (Handover)</option>
+                        <option value="borrowed">📥 รอนำมาคืน (Return)</option>
+                    </select>
                 </div>
 
-                <!-- รายการรอรับคืน (Borrowed) -->
                 <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-4">
-                    <h2 class="font-bold text-lg text-orange-600 mb-3 flex items-center gap-2">🔽 รอรับคืน (ของอยู่ระหว่างยืม)</h2>
-                    <div id="list-borrowed" class="space-y-3">กำลังโหลด...</div>
+                    <div id="requests-list" class="space-y-3">กำลังโหลด...</div>
                 </div>
             </div>
 
-            <!-- Modal กระบวนการสแกนและเซ็นชื่อ -->
-            <div id="handover-modal" class="fixed inset-0 bg-gray-900/95 hidden flex-col z-[60] overflow-y-auto p-4 md:p-8 text-white">
-                <div class="max-w-2xl mx-auto w-full space-y-6">
-                    <div class="flex justify-between items-center">
-                        <h2 id="modal-title" class="text-2xl font-bold text-white">กระบวนการ...</h2>
-                        <button onclick="closeHandoverModal()" class="text-gray-400 hover:text-white text-xl font-bold">❌ ปิด</button>
-                    </div>
+            <!-- หน้าจอ 1.5: สแกนรหัส + ถ่ายรูป -->
+            <div id="view-prepare" class="hidden flex-col h-full bg-white absolute inset-0 z-40 overflow-y-auto">
+                <div class="bg-white border-b border-gray-200 p-4 flex justify-between items-center sticky top-0 z-10 shadow-sm">
+                    <button onclick="closePrepareView()" class="text-gray-500 hover:bg-gray-100 px-3 py-1.5 rounded-lg transition-colors font-medium">❌ ยกเลิก</button>
+                    <h2 class="font-bold text-lg text-gray-800" id="prepare-title">ขั้นตอนการตรวจสอบอุปกรณ์</h2>
+                    <div class="w-16"></div>
+                </div>
 
-                    <!-- สเต็ป 1: สแกน QR ตรวจเช็คของ -->
-                    <div class="bg-gray-800 rounded-2xl p-6 border border-gray-700">
-                        <h3 class="font-bold text-lg mb-3">1. สแกนตรวจสอบสิ่งของ</h3>
+                <div class="p-6 max-w-xl mx-auto w-full space-y-6 pb-24">
+                    <div class="bg-gray-50 p-5 rounded-2xl border border-gray-200 shadow-sm">
+                        <h3 class="font-bold text-gray-800 mb-1">1. สแกนตรวจสอบรายการ</h3>
+                        <p class="text-xs text-gray-500 mb-4">สแกน QR หรือกรอกรหัสเพื่อเช็คของให้ตรงกับรายการ</p>
                         
-                        <div class="flex gap-2 mb-4">
-                            <input type="text" id="manual-code" placeholder="พิมพ์รหัสอุปกรณ์ที่นี่..." class="flex-1 bg-gray-700 border border-gray-600 rounded-xl p-3 text-white outline-none">
-                            <button onclick="checkItemCode()" class="bg-blue-600 hover:bg-blue-700 px-4 rounded-xl font-bold">ตรวจสอบ</button>
-                            <button onclick="startScanner()" class="bg-indigo-600 hover:bg-indigo-700 px-4 rounded-xl font-bold">📷 สแกน QR</button>
-                        </div>
-                        <div id="reader" class="hidden w-full bg-black rounded-xl overflow-hidden mb-4 border border-gray-700"></div>
-                        
-                        <!-- รายการของที่ต้องเช็ค -->
-                        <div class="bg-gray-900 rounded-xl p-4 space-y-2" id="items-checklist">
-                            <!-- โหลดรายการของที่นี่ -->
-                        </div>
-                    </div>
-
-                    <!-- สเต็ป 2: ถ่ายรูปหลักฐาน -->
-                    <div class="bg-gray-800 rounded-2xl p-6 border border-gray-700">
-                        <h3 class="font-bold text-lg mb-3">2. ถ่ายรูปสภาพสิ่งของ</h3>
-                        <input type="file" id="evidence-photo" accept="image/*" capture="environment" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-gray-700 file:text-white hover:file:bg-gray-600 cursor-pointer mb-2">
-                        <img id="photo-preview" class="hidden w-full max-h-64 object-contain rounded-xl border border-gray-600 mt-3">
-                    </div>
-
-                    <!-- สเต็ป 3: เซ็นชื่อร่วมกัน -->
-                    <div class="bg-gray-800 rounded-2xl p-6 border border-gray-700">
-                        <h3 class="font-bold text-lg mb-3">3. ลงนามยืนยัน (เขียนด้วยนิ้ว/เมาส์)</h3>
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <div>
-                                <p class="text-sm text-gray-400 mb-1" id="sig-label-1">ลายเซ็นสตาฟฟ์</p>
-                                <canvas id="sig-pad-1" class="w-full h-32 bg-gray-100 rounded-xl border-2 border-dashed border-gray-400 cursor-crosshair touch-none"></canvas>
-                                <button onclick="clearSig(1)" class="text-red-400 text-xs mt-1 hover:underline">ล้างลายเซ็น</button>
+                        <div class="mb-5 bg-white p-4 rounded-xl border border-gray-200">
+                            <div id="qr-reader" class="mb-4 hidden"></div>
+                            <div class="flex gap-2">
+                                <button onclick="toggleScanner()" id="btn-toggle-scanner" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 px-4 py-2 rounded-xl font-bold transition-colors shadow-sm shrink-0 flex items-center gap-2">📷 เปิดกล้องสแกน</button>
+                                <input type="text" id="scan-input" placeholder="พิมพ์รหัส 01001..." class="flex-1 border border-gray-300 rounded-xl px-3 py-2 outline-none focus:border-indigo-500 uppercase font-mono text-sm" onkeypress="handleScanEnter(event)">
+                                <button onclick="handleAddManual()" class="bg-gray-800 hover:bg-gray-900 text-white px-4 py-2 rounded-xl font-bold shadow-sm transition-colors shrink-0">ตรวจ</button>
                             </div>
-                            <div>
-                                <p class="text-sm text-gray-400 mb-1" id="sig-label-2">ลายเซ็นผู้ยืม</p>
-                                <canvas id="sig-pad-2" class="w-full h-32 bg-gray-100 rounded-xl border-2 border-dashed border-gray-400 cursor-crosshair touch-none"></canvas>
-                                <button onclick="clearSig(2)" class="text-red-400 text-xs mt-1 hover:underline">ล้างลายเซ็น</button>
+                        </div>
+                        
+                        <div>
+                            <p class="text-xs font-bold text-gray-400 mb-2 uppercase tracking-wide">รายการสิ่งของ (<span id="count-checked">0</span>/<span id="count-total">0</span>)</p>
+                            <ul id="checklist-items" class="space-y-2 mb-4"></ul>
+                            <div id="extra-items-container" class="hidden">
+                                <p class="text-xs font-bold text-orange-400 mb-2 uppercase tracking-wide mt-4">⚠️ นอกเหนือรายการขอ (เขียนลง PDF ด้วย)</p>
+                                <ul id="extra-items" class="space-y-2"></ul>
                             </div>
                         </div>
                     </div>
 
-                    <button onclick="finalizeHandover()" id="btn-finalize" class="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-xl font-bold text-lg shadow-lg mb-8 transition-all">
-                        ✅ ยืนยันกระบวนการและสร้างเอกสาร PDF
+                    <div class="bg-gray-50 p-5 rounded-2xl border border-gray-200 shadow-sm">
+                        <h3 class="font-bold text-gray-800 mb-1">2. บันทึกภาพหลักฐาน</h3>
+                        <p class="text-xs text-gray-500 mb-4">ถ่ายภาพอุปกรณ์ร่วมกับผู้ยืมเพื่อเป็นหลักฐานยืนยันสภาพ</p>
+                        <div class="text-center">
+                            <input type="file" id="photo-input" accept="image/*" capture="environment" class="hidden" onchange="previewPhoto(event)">
+                            <label for="photo-input" class="cursor-pointer inline-flex items-center gap-2 bg-white border-2 border-dashed border-gray-300 hover:border-indigo-500 hover:bg-indigo-50 px-8 py-4 rounded-xl font-bold text-gray-600 transition-colors w-full justify-center">
+                                📸 กดเพื่อถ่ายภาพ / อัปโหลดรูป
+                            </label>
+                            <div id="photo-preview-container" class="mt-4 hidden relative">
+                                <img id="photo-preview" class="w-full rounded-xl border border-gray-200 shadow-sm max-h-64 object-cover">
+                                <button onclick="removePhoto()" class="absolute -top-3 -right-3 bg-red-500 text-white rounded-full p-1.5 shadow-md hover:bg-red-600">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button onclick="goToSignDocument()" class="w-full bg-green-600 hover:bg-green-700 text-white py-4 rounded-2xl font-bold shadow-lg transition-all text-lg flex justify-center items-center gap-2">
+                        ถัดไป: เซ็นเอกสาร 👉
                     </button>
                 </div>
             </div>
 
+            <!-- หน้าจอ 2: เซ็น PDF -->
+            <div id="view-draw" class="hidden flex-col h-full bg-gray-900 absolute inset-0 z-50">
+                <div class="bg-gray-800 text-white p-3 md:p-4 flex flex-col md:flex-row justify-between items-center shrink-0 shadow-lg gap-3">
+                    <div class="flex items-center gap-4 w-full md:w-auto justify-between">
+                        <button onclick="backToPrepareView()" class="hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap">◀ ย้อนกลับ</button>
+                        <div class="flex items-center gap-2 bg-gray-900 rounded-lg px-2 py-1">
+                            <button onclick="changePage(-1)" class="px-3 py-1 hover:text-indigo-400 font-bold">&lt;</button>
+                            <span id="page-num-display" class="text-sm font-mono w-16 text-center">1 / 1</span>
+                            <button onclick="changePage(1)" class="px-3 py-1 hover:text-indigo-400 font-bold">&gt;</button>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 w-full md:w-auto justify-end">
+                        <button onclick="clearDrawing()" class="text-red-400 hover:bg-gray-700 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">🧹 ล้าง</button>
+                        <button onclick="saveCurrentPageDrawing()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-md transition-colors whitespace-nowrap">💾 ฝังลายเซ็นหน้านี้</button>
+                        <button id="btn-confirm-action" onclick="confirmAndSubmit()" class="bg-indigo-500 hover:bg-indigo-600 text-white px-5 py-2 rounded-xl font-bold shadow-md transition-colors flex gap-2 items-center whitespace-nowrap">
+                            📦 ยืนยัน
+                        </button>
+                    </div>
+                </div>
+                <div id="sign-alert" class="bg-indigo-900 text-indigo-100 text-center py-2 text-sm font-medium shadow-md">
+                    กรุณาให้ <span class="text-yellow-300">"ผู้ส่งมอบ"</span> และ <span class="text-yellow-300">"ผู้รับของ"</span> เซ็นชื่อลงในเอกสารให้เรียบร้อย
+                </div>
+                <div class="flex-1 overflow-auto flex justify-center p-4 md:p-8 bg-gray-900" id="scroll-area">
+                    <div id="pdf-container">
+                        <canvas id="pdf-render"></canvas>
+                        <canvas id="draw-layer"></canvas>
+                    </div>
+                </div>
+            </div>
+            
         </main>
     </div>
 
-    <!-- โหลดสคริปต์ตามลำดับ -->
     <script src="../config.js"></script>
     <script src="layout.js"></script>
     <script src="handover.js"></script>

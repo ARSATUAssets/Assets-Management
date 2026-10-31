@@ -1,191 +1,55 @@
-window.onload = async () => {
-    // 1. เพิ่มโค้ด 4 บรรทัดนี้ เพื่อดักคนหน้าประตู
-    const savedUser = localStorage.getItem('arsatu_user');
-if (!savedUser) return window.location.href = '../index.html'; // ถ้าไม่มีข้อมูลเตะกลับหน้าแรก
-
-currentUser = JSON.parse(savedUser); // ใช้งานตัวแปรนี้แทน session.user.id ได้เลย
-// ตัวอย่าง: currentUser.id คือ LINE UID ของเขา
-    if (!session) return window.location.href = '../index.html'; // ไม่ได้ล็อกอิน เตะไปหน้าแรก
-    const { data: user } = await supabaseClient.from('users').select('role').eq('id', session.user.id).single();
-    if (user.role !== 'staff' && user.role !== 'admin') return window.location.href = '../user/index.html'; // ไม่ใช่สตาฟฟ์ เตะไปหน้าคนนอก
-    
-    // โค้ดเดิมที่คุณมีอยู่แล้ว
-    await fetchDepartments();
-    await fetchLocations();
-    await fetchAssets();
-};
-
+let currentUser = null;
 let currentEventId = null;
-let allAvailableAssets = [];
 let html5QrcodeScanner = null;
 let currentScannedAsset = null; 
-let currentUser = null; // เก็บ Session ของคนที่ล็อกอินอยู่
+
+// 💡 ตัวแปรกลางสำหรับใช้ค้นหาและฟิลเตอร์
+let allEvents = [];
+let allAvailableAssets = [];
+let allEventItems = []; 
 
 window.onload = async () => {
-    await checkAuth(); // เช็คก่อนว่าใครล็อกอิน
+    await checkAuth();
     if(currentUser) {
         await fetchEvents();
     }
 };
 
-// 1. ดึงข้อมูล User ปัจจุบันที่ล็อกอินอยู่
 async function checkAuth() {
     const savedUser = localStorage.getItem('arsatu_user');
-if (!savedUser) return window.location.href = '../index.html'; // ถ้าไม่มีข้อมูลเตะกลับหน้าแรก
+    if (!savedUser) return window.location.href = '../index.html'; 
 
-currentUser = JSON.parse(savedUser); // ใช้งานตัวแปรนี้แทน session.user.id ได้เลย
-// ตัวอย่าง: currentUser.id คือ LINE UID ของเขา
-    if (!session) {
-        Swal.fire({
-            title: 'กรุณาเข้าสู่ระบบ',
-            text: 'ระบบนี้จำเป็นต้องล็อกอินเพื่อระบุตัวตน',
-            icon: 'warning',
-            confirmButtonText: 'กลับหน้าแรก',
-            allowOutsideClick: false
-        }).then(() => window.location.href = '../index.html');
-        return;
+    currentUser = JSON.parse(savedUser); 
+    if (currentUser.role !== 'staff' && currentUser.role !== 'admin') {
+        return window.location.href = '../user/index.html'; 
     }
-    
-    // ดึงข้อมูลชื่อจากตาราง users
-    const { data: userProfile } = await supabaseClient.from('users').select('id, display_name').eq('id', session.user.id).single();
-    currentUser = userProfile || { id: session.user.id, display_name: session.user.email };
-    document.getElementById('current-user-name').innerText = `(${currentUser.display_name})`;
 }
 
-// 2. ดึงข้อมูลค่าย (Supabase จะกรองตาม RLS ให้เฉพาะที่สร้างเองหรือโดน Invite มา)
+// ==========================================
+// 1. ระบบจัดการค่าย (Events)
+// ==========================================
 async function fetchEvents() {
-    const { data, error } = await supabaseClient.from('usage_events').select('*').order('created_at', { ascending: false });
     const list = document.getElementById('event-list');
-    list.innerHTML = '';
-    
-    if (error || !data.length) { 
-        list.innerHTML = '<div class="text-center p-8 text-gray-400 text-sm">ยังไม่มีกิจกรรมค่าย (กดปุ่ม + เพื่อสร้างค่ายแรกของคุณ)</div>'; 
-        return; 
-    }
+    list.innerHTML = '<div class="text-center p-8 text-gray-400 text-sm">กำลังโหลด...</div>';
 
-    data.forEach(ev => {
-        let statusColor = ev.status === 'completed' ? 'bg-green-100 text-green-700 border-green-200' : 'bg-indigo-50 text-indigo-700 border-indigo-200';
-        let statusText = ev.status === 'completed' ? 'จบค่ายแล้ว' : 'กำลังดำเนินการ';
-        let ownerBadge = ev.created_by === currentUser.id ? '👑 เจ้าของ' : '👥 ทีมงาน';
+    // 💡 ดึงข้อมูล (ถ้ามี Error จะแจ้งเตือนตัวแดง)
+    const { data, error } = await supabaseClient.from('usage_events')
+        .select('*')
+        .order('created_at', { ascending: false });
         
-        list.innerHTML += `
-            <div onclick="selectEvent(${ev.id}, '${ev.name}', '${ev.event_date || '-'}', '${ev.created_by}')" class="p-4 border border-transparent hover:border-gray-200 hover:bg-gray-50 rounded-xl cursor-pointer transition-all ${currentEventId === ev.id ? 'bg-indigo-50 border-indigo-200 shadow-sm' : 'bg-white border-gray-100'}">
-                <div class="font-bold text-gray-800">${ev.name}</div>
-                <div class="flex justify-between items-center mt-2.5">
-                    <span class="text-xs text-gray-500 font-medium flex gap-2">
-                        <span>📅 ${ev.event_date || 'ไม่ระบุ'}</span>
-                        <span class="text-gray-400">|</span>
-                        <span>${ownerBadge}</span>
-                    </span>
-                    <span class="text-[10px] font-bold px-2.5 py-1 rounded border ${statusColor}">${statusText}</span>
-                </div>
-            </div>
-        `;
-    });
-}
-
-// 3. จัดการค่าย และ Collaborator
-function selectEvent(id, name, date, createdBy) {
-    currentEventId = id;
-    document.getElementById('current-event-name').innerText = name;
-    document.getElementById('current-event-date').innerText = `วันที่: ${date}`;
-    document.getElementById('event-details-panel').classList.remove('hidden');
-    document.getElementById('no-selection-panel').classList.add('hidden');
-    
-    // ซ่อนปุ่มเพิ่มคนถ้าไม่ใช่เจ้าของ
-    const btnAddCollab = document.getElementById('btn-add-collab');
-    if(createdBy === currentUser.id) {
-        btnAddCollab.classList.remove('hidden');
-    } else {
-        btnAddCollab.classList.add('hidden');
-    }
-
-    fetchEvents(); // รีเฟรชแถบไฮไลท์สี
-    fetchEventItems(id);
-    fetchCollaborators(id, createdBy); // โหลดรูปคนในทีม
-}
-
-// --------------------------------------------------
-// ระบบจัดการสมาชิก (Collaborator System)
-// --------------------------------------------------
-async function fetchCollaborators(eventId, createdBy) {
-    // ดึงคนสร้างก่อน
-    const { data: owner } = await supabaseClient.from('users').select('display_name').eq('id', createdBy).single();
-    
-    // ดึง Collaborators
-    const { data: collabs } = await supabaseClient.from('usage_event_collaborators').select('user_id, users(display_name)').eq('event_id', eventId);
-    
-    let collabHtml = `<div class="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-[10px] font-bold border-2 border-white" title="เจ้าของ: ${owner?.display_name}">${owner?.display_name?.charAt(0).toUpperCase()}</div>`;
-    
-    if(collabs) {
-        collabs.forEach(c => {
-            collabHtml += `<div class="w-6 h-6 rounded-full bg-indigo-400 text-white flex items-center justify-center text-[10px] font-bold border-2 border-white" title="${c.users.display_name}">${c.users.display_name.charAt(0).toUpperCase()}</div>`;
-        });
-    }
-    document.getElementById('current-event-collab').innerHTML = collabHtml;
-}
-
-async function openCollabModal() {
-    document.getElementById('collab-modal').classList.remove('hidden');
-    document.getElementById('collab-modal').classList.add('flex');
-    
-    // ดึงรายชื่อสตาฟฟ์ทั้งหมดมาใส่ Dropdown
-    const { data: users } = await supabaseClient.from('users').select('id, display_name').eq('role', 'staff').neq('id', currentUser.id);
-    const select = document.getElementById('user-selector');
-    select.innerHTML = '<option value="">-- เลือกสมาชิกสตาฟฟ์ --</option>';
-    if(users) {
-        users.forEach(u => select.innerHTML += `<option value="${u.id}">${u.display_name}</option>`);
-    }
-    
-    reloadCollabList();
-}
-
-function closeCollabModal() {
-    document.getElementById('collab-modal').classList.add('hidden');
-    document.getElementById('collab-modal').classList.remove('flex');
-}
-
-async function reloadCollabList() {
-    const { data: collabs } = await supabaseClient.from('usage_event_collaborators').select('id, users(display_name)').eq('event_id', currentEventId);
-    const list = document.getElementById('collab-list');
-    list.innerHTML = '';
-    
-    if(!collabs || collabs.length === 0) {
-        list.innerHTML = '<div class="text-sm text-gray-400">ยังไม่มีผู้ร่วมทีม</div>';
+    if (error) {
+        console.error("Fetch Events Error:", error);
+        list.innerHTML = `<div class="text-center p-6 text-red-500 text-sm font-bold border border-red-200 bg-red-50 rounded-xl m-2">ดึงข้อมูลล้มเหลว:<br>${error.message}</div>`;
         return;
     }
-    
-    collabs.forEach(c => {
-        list.innerHTML += `
-            <div class="flex justify-between items-center p-3 bg-white border border-gray-100 rounded-lg">
-                <div class="font-medium text-gray-800 text-sm">👤 ${c.users.display_name}</div>
-                <button onclick="removeCollaborator(${c.id})" class="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs font-bold transition-colors">เตะออก</button>
-            </div>
-        `;
-    });
-}
 
-async function addCollaborator() {
-    const userId = document.getElementById('user-selector').value;
-    if(!userId) return;
-    
-    const { error } = await supabaseClient.from('usage_event_collaborators').insert({ event_id: currentEventId, user_id: userId });
-    
-    if(error) {
-        Swal.fire('เพิ่มไม่ได้', 'บุคคลนี้อยู่ในทีมอยู่แล้ว หรือเกิดข้อผิดพลาด', 'error');
-    } else {
-        reloadCollabList();
-        fetchCollaborators(currentEventId, currentUser.id); // โหลดรูปไอคอนข้างบนใหม่
-        document.getElementById('user-selector').value = '';
+    if (data) {
+        allEvents = data;
+        applyEventFilter();
     }
 }
 
-async function removeCollaborator(collabId) {
-    await supabaseClient.from('usage_event_collaborators').delete().eq('id', collabId);
-    reloadCollabList();
-    fetchCollaborators(currentEventId, currentUser.id);
-}
-
+// 💡 2. บังคับใส่สถานะ และดักจับ Error กรณีบันทึกไม่สำเร็จ
 async function createNewEvent() {
     const { value: formValues } = await Swal.fire({
         title: 'สร้างกิจกรรมค่ายใหม่',
@@ -195,47 +59,154 @@ async function createNewEvent() {
     });
 
     if (formValues && formValues.name) {
-        await supabaseClient.from('usage_events').insert([{ name: formValues.name, event_date: formValues.date || null }]);
-        fetchEvents(); Swal.fire({ icon: 'success', title: 'สร้างเรียบร้อย', timer: 1000, showConfirmButton: false });
+        Swal.fire({ title: 'กำลังสร้างค่าย...', didOpen: () => Swal.showLoading() });
+        
+        const { data, error } = await supabaseClient.from('usage_events').insert([{ 
+            name: formValues.name, 
+            event_date: formValues.date || null,
+            created_by: currentUser.id,
+            status: 'active' 
+        }]);
+
+        if (error) {
+            console.error("Insert Event Error:", error);
+            Swal.fire('ข้อผิดพลาดจากฐานข้อมูล', error.message, 'error');
+        } else {
+            await fetchEvents(); 
+            Swal.fire({ icon: 'success', title: 'สร้างเรียบร้อย', timer: 1000, showConfirmButton: false });
+        }
     }
 }
 
-function selectEvent(id, name, date) {
+function selectEvent(id) {
+    const ev = allEvents.find(e => e.id === id);
+    if (!ev) return;
+
     currentEventId = id;
-    document.getElementById('current-event-name').innerText = name;
-    document.getElementById('current-event-date').innerText = `วันที่: ${date}`;
+    document.getElementById('current-event-name').innerText = ev.name;
+    document.getElementById('current-event-date').innerText = `วันที่: ${ev.event_date || '-'}`;
     document.getElementById('event-details-panel').classList.remove('hidden');
     document.getElementById('no-selection-panel').classList.add('hidden');
-    fetchEvents(); fetchEventItems(id);
+    
+    // เคลียร์ช่องค้นหาของ
+    document.getElementById('search-usage-item').value = '';
+
+    const btnAddCollab = document.getElementById('btn-add-collab');
+    if (ev.created_by === currentUser.id) {
+        btnAddCollab.classList.remove('hidden');
+    } else {
+        btnAddCollab.classList.add('hidden');
+    }
+
+    applyEventFilter(); // รีเฟรชแถบไฮไลท์สีซ้ายมือ
+    fetchEventItems(id);
+    fetchCollaborators(id, ev.created_by); 
 }
 
+async function markEventCompleted() {
+    const { isConfirmed } = await Swal.fire({ title: 'ยืนยันปิดค่าย', text: "เมื่อปิดแล้วจะถือว่าค่ายเสร็จสมบูรณ์", icon: 'warning', showCancelButton: true, confirmButtonText: 'ตกลง', confirmButtonColor: '#16a34a' });
+    if (isConfirmed) { 
+        await supabaseClient.from('usage_events').update({ status: 'completed' }).eq('id', currentEventId); 
+        fetchEvents(); 
+        document.getElementById('event-details-panel').classList.add('hidden'); 
+        document.getElementById('no-selection-panel').classList.remove('hidden'); 
+        Swal.fire('สำเร็จ', 'บันทึกการจบค่ายเรียบร้อย', 'success'); 
+    }
+}
+
+// ==========================================
+// 2. ระบบจัดการของในค่าย (Usage Items)
+// ==========================================
 async function fetchEventItems(eventId) {
     const tbody = document.getElementById('usage-items-body');
     tbody.innerHTML = '<tr><td colspan="3" class="text-center p-12 text-gray-400">กำลังโหลดรายการ...</td></tr>';
 
-    const { data, error } = await supabaseClient.from('usage_items').select('*, assets(asset_code, name, category, qty_available)').eq('event_id', eventId).order('id', { ascending: true });
-    if (error || !data.length) { tbody.innerHTML = '<tr><td colspan="3" class="text-center p-12 text-gray-400 bg-gray-50/50">ยังไม่มีรายการสิ่งของในเช็คลิสต์</td></tr>'; return; }
+    const { data, error } = await supabaseClient.from('usage_items')
+        .select('*, assets(asset_code, name, category, qty_available)')
+        .eq('event_id', eventId)
+        .order('id', { ascending: true });
 
+    if (error || !data || data.length === 0) { 
+        allEventItems = [];
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center p-12 text-gray-400 bg-gray-50/50 rounded-b-2xl">ยังไม่มีรายการสิ่งของในเช็คลิสต์</td></tr>'; 
+        updateProgressSummary();
+        return; 
+    }
+
+    allEventItems = data;
+    applyItemFilter();
+}
+
+function applyItemFilter() {
+    const searchText = document.getElementById('search-usage-item').value.toLowerCase().trim();
+    const tbody = document.getElementById('usage-items-body');
     tbody.innerHTML = '';
-    data.forEach(item => {
+
+    const filtered = allEventItems.filter(item => {
+        if (!searchText) return true;
+        const name = item.assets.name.toLowerCase();
+        const code = item.assets.asset_code.toLowerCase();
+        return name.includes(searchText) || code.includes(searchText);
+    });
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="text-center p-8 text-gray-400">ไม่พบรายการที่ค้นหา</td></tr>';
+        updateProgressSummary();
+        return;
+    }
+
+    filtered.forEach(item => {
         const asset = item.assets;
         let statusFlow = '';
+        
+        // 💡 ปุ่มอัปเดตสถานะ (ปรับให้สวยและเรียบร้อยขึ้น)
         if (item.status === 'listed') {
-            statusFlow = `<button onclick="updateItemStatus(${item.id}, ${item.asset_id}, 'loaded', '${asset.category}', ${item.qty})" class="bg-indigo-50 border border-indigo-200 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors shadow-sm w-full md:w-auto">🔼 เอาขึ้นรถ</button>`;
+            statusFlow = `<button onclick="updateItemStatus(${item.id}, ${item.asset_id}, 'loaded', '${asset.category}', ${item.qty})" class="bg-indigo-50 border border-indigo-200 text-indigo-700 px-4 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-100 transition-colors shadow-sm w-full md:w-auto">🔼 เอาขึ้นรถ</button>`;
         } else if (item.status === 'loaded') {
-            statusFlow = `<div class="flex justify-center gap-1.5 flex-wrap md:flex-nowrap"><button onclick="updateItemStatus(${item.id}, ${item.asset_id}, 'returned', '${asset.category}', ${item.qty})" class="bg-green-50 border border-green-200 text-green-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-green-100 transition-colors shadow-sm flex-1 md:flex-none">✅ คืนคลังครบ</button><button onclick="updateItemStatus(${item.id}, ${item.asset_id}, 'issue', '${asset.category}', ${item.qty})" class="bg-red-50 border border-red-200 text-red-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors shadow-sm flex-1 md:flex-none">⚠️ มีปัญหา</button></div>`;
+            statusFlow = `
+                <div class="flex justify-center md:justify-start gap-1.5 flex-wrap md:flex-nowrap">
+                    <button onclick="updateItemStatus(${item.id}, ${item.asset_id}, 'returned', '${asset.category}', ${item.qty})" class="bg-green-50 border border-green-200 text-green-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-green-100 transition-colors shadow-sm flex-1 md:flex-none">✅ รับคืน</button>
+                    <button onclick="updateItemStatus(${item.id}, ${item.asset_id}, 'issue', '${asset.category}', ${item.qty})" class="bg-red-50 border border-red-200 text-red-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-red-100 transition-colors shadow-sm flex-1 md:flex-none">⚠️ มีปัญหา</button>
+                </div>`;
         } else if (item.status === 'returned') {
-            statusFlow = `<span class="bg-gray-100 text-gray-500 px-3 py-1 rounded-full font-bold text-xs">✔️ กลับเข้าคลังแล้ว</span>`;
+            statusFlow = `<span class="bg-gray-100 text-gray-500 px-3 py-1 rounded-full font-bold text-xs border border-gray-200 inline-block">✔️ กลับเข้าคลังแล้ว</span>`;
         } else {
-            statusFlow = `<span class="bg-red-100 text-red-700 px-3 py-1 rounded-full font-bold text-xs">❌ แจ้งสูญหาย/ชำรุด</span>`;
+            statusFlow = `<span class="bg-red-100 text-red-700 px-3 py-1 rounded-full font-bold text-xs border border-red-200 inline-block">❌ แจ้งสูญหาย/ชำรุด</span>`;
         }
 
-        tbody.innerHTML += `<tr class="border-b border-gray-50 hover:bg-gray-50/50 transition-colors"><td class="p-4"><div class="font-medium text-gray-800">${asset.name}</div><div class="font-mono text-xs text-blue-600 mt-0.5">${asset.asset_code}</div></td><td class="p-4 text-center font-bold text-gray-700 bg-gray-50/30">${item.qty}</td><td class="p-4 text-center">${statusFlow}</td></tr>`;
+        tbody.innerHTML += `
+            <tr class="border-b border-gray-50 hover:bg-blue-50/30 transition-colors">
+                <td class="p-4">
+                    <div class="font-medium text-gray-800">${asset.name}</div>
+                    <div class="font-mono text-xs text-indigo-600 mt-0.5">${asset.asset_code}</div>
+                </td>
+                <td class="p-4 text-center font-bold text-gray-700 bg-gray-50/30 w-20">${item.qty}</td>
+                <td class="p-4 text-center md:text-left">${statusFlow}</td>
+            </tr>`;
     });
+
+    updateProgressSummary();
+}
+
+function updateProgressSummary() {
+    const total = allEventItems.length;
+    // นับจำนวนที่ขึ้นรถไปแล้ว (รวมถึงที่คืนแล้วและมีปัญหาด้วย ถือว่าผ่านขั้นตอนเอาขึ้นรถไปแล้ว)
+    const loaded = allEventItems.filter(i => i.status !== 'listed').length;
+    
+    document.getElementById('progress-total').innerText = total;
+    document.getElementById('progress-loaded').innerText = loaded;
+    
+    const loadedElement = document.getElementById('progress-loaded');
+    if (loaded === total && total > 0) {
+        loadedElement.classList.replace('text-indigo-600', 'text-green-600');
+    } else {
+        loadedElement.classList.replace('text-green-600', 'text-indigo-600');
+    }
 }
 
 async function updateItemStatus(usageItemId, assetId, newStatus, category, qty) {
     await supabaseClient.from('usage_items').update({ status: newStatus }).eq('id', usageItemId);
+    
     if (newStatus === 'loaded') {
         if (category === 'durable') await supabaseClient.from('assets').update({ status: 'borrowed' }).eq('id', assetId);
         else {
@@ -251,11 +222,59 @@ async function updateItemStatus(usageItemId, assetId, newStatus, category, qty) 
     } else if (newStatus === 'issue') {
         if (category === 'durable') await supabaseClient.from('assets').update({ status: 'lost' }).eq('id', assetId);
     }
+    
     fetchEventItems(currentEventId);
 }
 
 // ==========================================
-// ระบบ Modal ของต่างๆ (เพิ่มปกติ)
+// 3. ระบบ Collaborators
+// ==========================================
+async function fetchCollaborators(eventId, createdBy) {
+    const { data: owner } = await supabaseClient.from('users').select('display_name').eq('id', createdBy).single();
+    const { data: collabs } = await supabaseClient.from('usage_event_collaborators').select('user_id, users(display_name)').eq('event_id', eventId);
+    
+    let collabHtml = `<div class="w-6 h-6 rounded-full bg-indigo-600 text-white flex items-center justify-center text-[10px] font-bold border-2 border-white shadow-sm" title="เจ้าของ: ${owner?.display_name}">${owner?.display_name?.charAt(0).toUpperCase()}</div>`;
+    
+    if(collabs) {
+        collabs.forEach(c => {
+            collabHtml += `<div class="w-6 h-6 rounded-full bg-blue-400 text-white flex items-center justify-center text-[10px] font-bold border-2 border-white shadow-sm" title="${c.users.display_name}">${c.users.display_name.charAt(0).toUpperCase()}</div>`;
+        });
+    }
+    document.getElementById('current-event-collab').innerHTML = collabHtml;
+}
+
+async function openCollabModal() {
+    document.getElementById('collab-modal').classList.remove('hidden');
+    document.getElementById('collab-modal').classList.add('flex');
+    const { data: users } = await supabaseClient.from('users').select('id, display_name').eq('role', 'staff').neq('id', currentUser.id);
+    const select = document.getElementById('user-selector');
+    select.innerHTML = '<option value="">-- เลือกสมาชิกสตาฟฟ์ --</option>';
+    if(users) users.forEach(u => select.innerHTML += `<option value="${u.id}">${u.display_name}</option>`);
+    reloadCollabList();
+}
+function closeCollabModal() { document.getElementById('collab-modal').classList.add('hidden'); document.getElementById('collab-modal').classList.remove('flex'); }
+
+async function reloadCollabList() {
+    const { data: collabs } = await supabaseClient.from('usage_event_collaborators').select('id, users(display_name)').eq('event_id', currentEventId);
+    const list = document.getElementById('collab-list'); list.innerHTML = '';
+    if(!collabs || collabs.length === 0) { list.innerHTML = '<div class="text-sm text-gray-400">ยังไม่มีผู้ร่วมทีม</div>'; return; }
+    collabs.forEach(c => {
+        list.innerHTML += `<div class="flex justify-between items-center p-3 bg-white border border-gray-100 rounded-lg"><div class="font-medium text-gray-800 text-sm">👤 ${c.users.display_name}</div><button onclick="removeCollaborator(${c.id})" class="text-red-500 hover:bg-red-50 px-2 py-1 rounded text-xs font-bold transition-colors">เตะออก</button></div>`;
+    });
+}
+async function addCollaborator() {
+    const userId = document.getElementById('user-selector').value; if(!userId) return;
+    const { error } = await supabaseClient.from('usage_event_collaborators').insert({ event_id: currentEventId, user_id: userId });
+    if(error) Swal.fire('เพิ่มไม่ได้', 'บุคคลนี้อยู่ในทีมอยู่แล้ว หรือเกิดข้อผิดพลาด', 'error');
+    else { reloadCollabList(); const ev = allEvents.find(e => e.id === currentEventId); fetchCollaborators(currentEventId, ev.created_by); document.getElementById('user-selector').value = ''; }
+}
+async function removeCollaborator(collabId) {
+    await supabaseClient.from('usage_event_collaborators').delete().eq('id', collabId);
+    reloadCollabList(); const ev = allEvents.find(e => e.id === currentEventId); fetchCollaborators(currentEventId, ev.created_by);
+}
+
+// ==========================================
+// 4. Modal เลือกของจากคลัง (Item Picker)
 // ==========================================
 async function openItemPickerModal() {
     document.getElementById('item-picker-modal').classList.remove('hidden'); document.getElementById('item-picker-modal').classList.add('flex');
@@ -273,6 +292,7 @@ function renderPickerList(assets) {
     });
 }
 function filterAssets() { const text = document.getElementById('search-asset').value.toLowerCase(); const filtered = allAvailableAssets.filter(a => a.name.toLowerCase().includes(text) || a.asset_code.toLowerCase().includes(text)); renderPickerList(filtered); }
+
 async function addSelectedItems() {
     const checkboxes = document.querySelectorAll('.asset-checkbox:checked');
     if (checkboxes.length === 0) return;
@@ -284,13 +304,9 @@ async function addSelectedItems() {
     await supabaseClient.from('usage_items').insert(itemsToInsert);
     closeItemPicker(); fetchEventItems(currentEventId); Swal.fire({ icon: 'success', title: 'เพิ่มของเรียบร้อย', timer: 1000, showConfirmButton: false });
 }
-async function markEventCompleted() {
-    const { isConfirmed } = await Swal.fire({ title: 'ยืนยันปิดค่าย', text: "เมื่อปิดแล้วจะถือว่าค่ายเสร็จสมบูรณ์", icon: 'warning', showCancelButton: true, confirmButtonText: 'ตกลง', confirmButtonColor: '#16a34a' });
-    if (isConfirmed) { await supabaseClient.from('usage_events').update({ status: 'completed' }).eq('id', currentEventId); fetchEvents(); document.getElementById('event-details-panel').classList.add('hidden'); document.getElementById('no-selection-panel').classList.remove('hidden'); Swal.fire('สำเร็จ', 'บันทึกการจบค่ายเรียบร้อย', 'success'); }
-}
 
 // ==========================================
-// ระบบสแกน QR Code เพื่อจัดการของทันที (Smart Scan)
+// 5. ระบบสแกน QR Code (Smart Scan)
 // ==========================================
 function openScannerModal() {
     if (!currentEventId) { Swal.fire('แจ้งเตือน', 'กรุณาเลือกค่ายก่อนสแกน', 'warning'); return; }
@@ -298,27 +314,23 @@ function openScannerModal() {
     html5QrCode = new Html5Qrcode("reader");
     html5QrCode.start({ facingMode: "environment" }, { fps: 10, qrbox: { width: 250, height: 250 } }, (decodedText) => { handleScanSuccess(decodedText); }, (err) => {}).catch(err => { Swal.fire('ข้อผิดพลาด', 'ไม่สามารถเปิดกล้องได้', 'error'); closeScannerModal(); });
 }
-
 function closeScannerModal() {
     if (html5QrCode) { html5QrCode.stop().then(() => { html5QrCode.clear(); }).catch(e => console.log(e)); }
     document.getElementById('scanner-modal').classList.add('hidden'); document.getElementById('scanner-modal').classList.remove('flex');
 }
 
-// ตรรกะอัจฉริยะหลังจากสแกนเจอ QR
 async function handleScanSuccess(scannedCode) {
     const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3'); audio.play().catch(e=>{});
-    closeScannerModal(); // ปิดกล้อง
+    closeScannerModal(); 
 
-    // 1. ค้นหาว่าของชิ้นนี้คืออะไรในฐานข้อมูล
     const { data: assetData, error: assetErr } = await supabaseClient.from('assets').select('*').eq('asset_code', scannedCode).single();
     if (assetErr || !assetData) { Swal.fire('ไม่พบทรัพย์สิน', `ไม่มีรหัส ${scannedCode} ในคลัง`, 'error'); return; }
 
-    currentScannedAsset = assetData; // เก็บไว้ใช้
+    currentScannedAsset = assetData;
     const assetName = assetData.name;
     const assetId = assetData.id;
     const cat = assetData.category;
 
-    // 2. เช็คว่าของชิ้นนี้อยู่ในค่ายที่เรากำลังจัดอยู่ไหม
     const { data: usageData } = await supabaseClient.from('usage_items').select('*').eq('event_id', currentEventId).eq('asset_id', assetId).single();
 
     const actionArea = document.getElementById('scan-action-area');
@@ -327,7 +339,6 @@ async function handleScanSuccess(scannedCode) {
     document.getElementById('scan-icon').innerText = "📦";
 
     if (!usageData) {
-        // กรณีที่ 1: ยังไม่มีในเช็คลิสต์เลย -> แสดงปุ่ม "เพิ่มเข้ารายการ"
         if (assetData.status !== 'available' || assetData.qty_available === 0) {
             document.getElementById('scan-asset-status-text').innerHTML = `<span class="text-red-500 font-bold">ไม่สามารถเพิ่มได้: ของไม่ได้พร้อมใช้งาน (สถานะ: ${assetData.status})</span>`;
             actionArea.innerHTML = `<button onclick="closeScannedActionModal()" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 py-3 rounded-xl font-bold">ปิดหน้าต่าง</button>`;
@@ -342,7 +353,6 @@ async function handleScanSuccess(scannedCode) {
         const usageId = usageData.id;
         const currentUsageStatus = usageData.status;
 
-        // กรณีที่ 2: อยู่ในรายการแล้ว เช็คสเตตัส
         if (currentUsageStatus === 'listed') {
             document.getElementById('scan-asset-status-text').innerText = "สถานะ: อยู่ในเช็คลิสต์ (เตรียมขึ้นรถ)";
             actionArea.innerHTML = `
@@ -363,22 +373,14 @@ async function handleScanSuccess(scannedCode) {
         }
     }
 
-    // เปิด Modal ให้เลือก Action
     document.getElementById('scanned-action-modal').classList.remove('hidden');
     document.getElementById('scanned-action-modal').classList.add('flex');
 }
 
-function closeScannedActionModal() {
-    document.getElementById('scanned-action-modal').classList.add('hidden');
-    document.getElementById('scanned-action-modal').classList.remove('flex');
-}
+function closeScannedActionModal() { document.getElementById('scanned-action-modal').classList.add('hidden'); document.getElementById('scanned-action-modal').classList.remove('flex'); }
 
-// -------------------------------------
-// ฟังก์ชันสำหรับทำงานจากปุ่ม Smart Action
-// -------------------------------------
 async function smartAction_AddToList(assetId) {
     closeScannedActionModal();
-    // 1 ชิ้นเสมอเพราะ QR สแกนเฉพาะของคงทนทีละชิ้น
     await supabaseClient.from('usage_items').insert([{ event_id: currentEventId, asset_id: assetId, qty: 1, status: 'listed' }]);
     fetchEventItems(currentEventId);
     Swal.fire({ icon: 'success', title: 'เพิ่มเข้ารายการแล้ว!', timer: 1000, showConfirmButton: false, toast: true, position: 'top-end' });

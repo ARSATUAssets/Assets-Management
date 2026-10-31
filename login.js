@@ -105,11 +105,15 @@ function checkUserRoleAndRedirect(userData) {
 // ==========================================
 // 🚨 ระบบจำลองการเข้าสู่ระบบ (Mock Login) สำหรับทดสอบ
 // ==========================================
+// ==========================================
+// 🚨 ระบบจำลองการเข้าสู่ระบบ (Mock Login) สำหรับทดสอบ
+// ==========================================
 function mockLogin(type) {
     let mockUser = {
-        id: "DEV_MOCK_USER", 
+        // 💡 เปลี่ยนจาก "DEV_MOCK_USER" เป็นรูปแบบ UUID ที่ถูกต้อง
+        id: "00000000-0000-0000-0000-000000000000", 
         phone: "0888888888",
-        department_id: 6 // สมมติว่า ID 1 คือ ฝ่ายสถานที่ (เปลี่ยนเลขได้ตามตาราง departments ของคุณ)
+        department_id: 6 // สมมติว่า ID 6 คือ ฝ่ายสถานที่
     };
 
     if (type === 'admin') {
@@ -139,7 +143,7 @@ function mockLogin(type) {
     // บันทึก Session จำลองลงเบราว์เซอร์
     localStorage.setItem('arsatu_user', JSON.stringify(mockUser));
 
-    // ส่งทุกคนไปหน้าคลังสิ่งของก่อน (เพราะหน้า Admin เรายังไม่ได้สร้าง)
+    // ส่งทุกคนไปหน้าคลังสิ่งของ
     setTimeout(() => {
         window.location.href = 'member/inventories.html';
     }, 1500);

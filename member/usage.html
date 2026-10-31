@@ -20,10 +20,8 @@
 </head>
 <body class="bg-[#f8fafc] text-gray-700 h-screen overflow-hidden">
 
-    <!-- โครงสร้างหลัก (Sidebar + Content) -->
     <div id="app-layout" class="flex flex-col md:flex-row h-screen">
         
-        <!-- โซนเนื้อหาหลัก -->
         <main class="flex-1 overflow-y-auto p-4 md:p-8 relative flex flex-col min-h-0">
             
             <header class="flex justify-between items-center bg-white p-5 rounded-2xl shadow-sm border border-gray-100 mb-6 shrink-0">
@@ -39,13 +37,22 @@
             </header>
 
             <div class="flex flex-col md:flex-row gap-6 flex-1 min-h-0">
+                
                 <!-- ฝั่งซ้าย: ค่าย -->
                 <div class="w-full md:w-1/3 bg-white rounded-2xl shadow-sm border border-gray-100 flex flex-col shrink-0">
                     <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 rounded-t-2xl">
-                        <h2 class="font-bold text-lg text-gray-800">📋 รายการค่าย/กิจกรรม</h2>
+                        <h2 class="font-bold text-lg text-gray-800">📋 รายการค่าย</h2>
                         <button onclick="createNewEvent()" class="bg-indigo-600 hover:bg-indigo-700 text-white w-8 h-8 rounded-full font-bold shadow-md shadow-indigo-200 flex justify-center items-center transition-colors">+</button>
                     </div>
-                    <div id="event-list" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar"></div>
+                    <!-- 💡 เพิ่มตัวกรองค่าย -->
+                    <div class="p-3 border-b border-gray-100 bg-white">
+                        <select id="event-filter" onchange="applyEventFilter()" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-indigo-500">
+                            <option value="active">🟢 กำลังดำเนินการ</option>
+                            <option value="completed">⚫ จบค่ายแล้ว</option>
+                            <option value="all">ทั้งหมด</option>
+                        </select>
+                    </div>
+                    <div id="event-list" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar bg-gray-50/30"></div>
                 </div>
 
                 <!-- ฝั่งขวา: รายละเอียด -->
@@ -56,10 +63,8 @@
                             <div class="flex items-center gap-3 mt-1 text-sm text-gray-500">
                                 <span id="current-event-date">วันที่: -</span>
                                 <span class="text-gray-300">|</span>
-                                <span id="current-event-collab" class="flex -space-x-2">
-                                    <!-- รูปโปรไฟล์/ชื่อ Collaborators จะขึ้นตรงนี้ -->
-                                </span>
-                                <button onclick="openCollabModal()" id="btn-add-collab" class="text-indigo-600 hover:bg-indigo-50 px-2 py-0.5 rounded-md font-medium text-xs border border-indigo-200 transition-colors">+ ชวนเพื่อนร่วมทีม</button>
+                                <span id="current-event-collab" class="flex -space-x-2"></span>
+                                <button onclick="openCollabModal()" id="btn-add-collab" class="text-indigo-600 hover:bg-indigo-50 px-2 py-0.5 rounded-md font-medium text-xs border border-indigo-200 transition-colors">+ ชวนเพื่อน</button>
                             </div>
                         </div>
                         <div class="flex flex-wrap gap-2">
@@ -71,17 +76,26 @@
                                 📦 เปิดคลัง
                             </button>
                             <button onclick="markEventCompleted()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-xl font-medium shadow-sm shadow-green-200 text-sm transition-all flex items-center gap-1">
-                                ✅ ปิดงาน
+                                ✅ ปิดค่าย
                             </button>
                         </div>
                     </div>
-                    <div class="flex-1 overflow-y-auto custom-scrollbar p-4">
-                        <table class="w-full text-left text-sm whitespace-nowrap">
+                    
+                    <!-- 💡 เพิ่มช่องค้นหาของ และสรุปความคืบหน้า -->
+                    <div class="p-3 border-b border-gray-100 bg-white flex flex-col md:flex-row gap-4 justify-between items-center shrink-0">
+                        <input type="text" id="search-usage-item" onkeyup="applyItemFilter()" placeholder="🔍 ค้นหารหัส หรือชื่อสิ่งของในค่าย..." class="w-full md:w-1/2 bg-gray-50 border border-gray-200 rounded-xl px-4 py-2 text-sm outline-none focus:bg-white focus:border-indigo-500 transition-colors">
+                        <div class="text-sm font-bold text-gray-600 bg-gray-100 px-4 py-2 rounded-xl border border-gray-200">
+                            ขึ้นรถแล้ว: <span id="progress-loaded" class="text-indigo-600 text-lg">0</span> / <span id="progress-total">0</span> ชิ้น
+                        </div>
+                    </div>
+
+                    <div class="flex-1 overflow-y-auto custom-scrollbar p-0 md:p-4">
+                        <table class="w-full text-left text-sm whitespace-nowrap border-collapse">
                             <thead>
                                 <tr class="bg-white text-gray-500 border-b border-gray-100">
-                                    <th class="pb-3 font-medium">รหัส / ชื่อสิ่งของ</th>
-                                    <th class="pb-3 font-medium text-center">จำนวน</th>
-                                    <th class="pb-3 font-medium text-center">อัปเดตสถานะการขนย้าย</th>
+                                    <th class="p-4 font-medium">รหัส / ชื่อสิ่งของ</th>
+                                    <th class="p-4 font-medium text-center">จำนวน</th>
+                                    <th class="p-4 font-medium text-center">สถานะ</th>
                                 </tr>
                             </thead>
                             <tbody id="usage-items-body" class="divide-y divide-gray-50"></tbody>
@@ -95,10 +109,9 @@
                 </div>
             </div>
 
-            <!-- Modals ทั้งหมด (วางไว้ด้านล่างสุดของ main) -->
-            <!-- 1. Modal จัดการ Collaborator -->
+            <!-- Modals เดิม 1-4 วางต่อตรงนี้ (ไม่ต้องแก้) ... -->
+            <!-- Modal 1: Collab -->
             <div id="collab-modal" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm hidden items-center justify-center z-[60] p-4 transition-opacity">
-                <!-- โค้ดเดิมของ Collab Modal -->
                 <div class="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col">
                     <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                         <h2 class="font-bold text-lg text-gray-800 flex items-center gap-2">👥 จัดการทีม (Collaborators)</h2>
@@ -117,9 +130,8 @@
                 </div>
             </div>
 
-            <!-- 2. Modal เลือกของจากคลัง -->
+            <!-- Modal 2: Item Picker -->
             <div id="item-picker-modal" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm hidden items-center justify-center z-[60] p-4 transition-opacity">
-                <!-- โค้ดเดิมของ Item Picker Modal -->
                 <div class="bg-white w-full max-w-3xl h-[80vh] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
                     <div class="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
                         <h2 class="font-bold text-lg text-gray-800 flex items-center gap-2">📦 ค้นหาจากคลังทรัพย์สิน</h2>
@@ -136,9 +148,8 @@
                 </div>
             </div>
 
-            <!-- 3. Modal เปิดกล้องสแกน QR -->
+            <!-- Modal 3: Scanner -->
             <div id="scanner-modal" class="fixed inset-0 bg-black/90 hidden flex-col items-center justify-center z-[70]">
-                <!-- โค้ดเดิมของ Scanner Modal -->
                 <div class="w-full max-w-sm p-4 relative">
                     <button onclick="closeScannerModal()" class="absolute -top-10 right-4 text-white text-3xl font-bold z-10">&times;</button>
                     <div class="bg-white p-2 rounded-2xl overflow-hidden shadow-2xl relative">
@@ -150,9 +161,8 @@
                 </div>
             </div>
 
-            <!-- 4. Modal จัดการสิ่งของที่สแกนเจอ (อัจฉริยะ) -->
+            <!-- Modal 4: Scanned Action -->
             <div id="scanned-action-modal" class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm hidden flex-col items-center justify-center z-[80] p-4">
-                <!-- โค้ดเดิมของ Action Modal -->
                 <div class="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
                     <div class="p-6 text-center border-b border-gray-100 bg-gray-50/50">
                         <div class="text-4xl mb-2" id="scan-icon">🔍</div>
@@ -167,7 +177,6 @@
         </main>
     </div>
 
-    <!-- โหลดสคริปต์ตามลำดับ -->
     <script src="../config.js"></script>
     <script src="layout.js"></script>
     <script src="usage.js"></script>

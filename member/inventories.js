@@ -356,25 +356,30 @@ form.addEventListener('submit', async (e) => {
     const editId = document.getElementById('edit_asset_id').value;
     const deptId = parseInt(document.getElementById('department_id').value);
     
+    // 💡 นำ status: 'available' ออกจากตรงนี้ เพื่อป้องกันการเซฟทับตอนแก้ไข
     const assetData = { 
         name: document.getElementById('asset_name').value, 
         department_id: deptId, 
         category: document.getElementById('category').value, 
         location_id: parseInt(document.getElementById('location_id').value) || null, 
         price: parseFloat(document.getElementById('price').value) || 0,
-        is_public_borrow: document.getElementById('is_public_borrow').checked,
-        status: 'available' 
+        is_public_borrow: document.getElementById('is_public_borrow').checked
     };
     
     try {
         if (editId) {
+            // กรณี: แก้ไขข้อมูล (อัปเดตเฉพาะข้อมูล ไม่ยุ่งกับสถานะการยืม)
             const { error } = await supabaseClient.from('assets').update(assetData).eq('id', parseInt(editId));
             if (error) throw error;
             Swal.fire({ icon: 'success', title: 'อัปเดตข้อมูลสำเร็จ', timer: 1500, showConfirmButton: false });
         } else {
+            // กรณี: เพิ่มของใหม่ (ใส่สถานะ available ให้เฉพาะตอนสร้างใหม่เท่านั้น)
             const qty = parseInt(document.getElementById('qty').value);
             let codes = await generateAssetCodeBatch(deptId, qty);
             let assetsToInsert = [];
+            
+            assetData.status = 'available'; // เติมสถานะตรงนี้แทน
+
             if (assetData.category === 'durable') {
                 for (let i = 0; i < qty; i++) assetsToInsert.push({ ...assetData, asset_code: codes[i], qty_available: 1 });
             } else {
@@ -387,6 +392,16 @@ form.addEventListener('submit', async (e) => {
         closeModal(); fetchAssets(); 
     } catch (error) { Swal.fire({ icon: 'error', title: 'บันทึกไม่สำเร็จ', text: error.message }); }
 });
+
+// 💡 ปรับลำดับการ Reset ฟอร์มใน openModal เล็กน้อย เพื่อไม่ให้ค่าเช็คบ็อกซ์เพี้ยน
+function openModal() { 
+    document.getElementById('modal-title').innerText = "ลงทะเบียนทรัพย์สินใหม่"; 
+    form.reset(); // เลื่อนการ reset มารอไว้ด้านบนสุด
+    document.getElementById('edit_asset_id').value = ""; 
+    document.getElementById('qty-section').style.display = "block"; 
+    document.getElementById('is_public_borrow').checked = true; 
+    modal.classList.remove('hidden'); modal.classList.add('flex'); 
+}
 
 // ==========================================
 // 8. ระบบสร้าง QR Code
